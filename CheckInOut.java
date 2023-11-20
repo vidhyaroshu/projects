@@ -16,6 +16,11 @@ public class CheckInOut {
 
     public static void main(String[] args) {
         Scanner input = new Scanner(System.in);
+            System.out.println("1. Check in /Check out\n2. Employee Report");
+            System.out.println("Enter your choice...");
+            int choice=input.nextInt();
+            switch(choice){
+            case 1:
 
             System.out.println("Enter the number of users: ");
             int numberOfUsers = input.nextInt();
@@ -35,8 +40,121 @@ public class CheckInOut {
                     employeeThread.start();
     
                 }
+                break;
+            case 2:
+                System.out.println("Enter Employee Id");
+                String employeeId = input.next();
+                generateEmployeeReport(employeeId);
+                break;
+            }
+
   
     }
+
+
+    private static void generateEmployeeReport(String employeeId) {
+        try (Jedis jedis = new Jedis(REDIS_HOST, REDIS_PORT);){
+
+            String workbookPath = "EmployeeCheckInOut.xls";
+
+            File file = new File(workbookPath);
+            Workbook workbook=null;
+            boolean sheetExists=false;
+            Sheet sheet=null;
+
+            if (file.exists()) {
+                 String sheetName= "Employee_" + employeeId;
+      
+                try (FileInputStream fileInputStream = new FileInputStream(workbookPath)) {
+                workbook= new HSSFWorkbook(fileInputStream);
+                  sheetExists = doesSheetExist(workbook, sheetName);
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            } 
+            else {
+                workbook = new HSSFWorkbook();
+                try (FileOutputStream fileOut = new FileOutputStream(file)) {
+                    workbook.write(fileOut);
+                }
+                catch(Exception e){
+                    e.printStackTrace();
+                }
+            }
+
+        try (FileOutputStream fileOut = new FileOutputStream("EmployeeCheckInOut.xls")) {
+
+            if (!sheetExists) {
+
+                sheet = workbook.createSheet("Employee_" + employeeId);
+                Row row = sheet.createRow(0);
+                row.createCell(0).setCellValue("Day");
+                row.createCell(1).setCellValue("checkin_time");
+                row.createCell(2).setCellValue("checkout_time");
+                row.createCell(3).setCellValue("checkin_status");
+                row.createCell(4).setCellValue("workingHours");
+
+            } 
+            else{
+                sheet = workbook.getSheet("Employee_" + employeeId);
+            }
+            int lastRowNum = sheet.getLastRowNum();
+            String cellValue="";
+            Row row=null;
+            row = sheet.getRow(lastRowNum);
+            Cell cell = row.getCell(0);
+            cellValue = cell.getStringCellValue();
+            boolean flag=false;
+
+            Set<String> unsortedKeys = jedis.keys("*");
+
+            Set<String> sortedKeys = new TreeSet<>((date1, date2) -> {
+                return date1.compareTo(date2);
+            });
+            sortedKeys.addAll(unsortedKeys);
+
+            for (String date : sortedKeys) {
+
+                lastRowNum = sheet.getLastRowNum();
+
+                String storedInnerHashAsString = jedis.hget(date, employeeId);
+                Map<String, String> storedInnerHash = convertStringToMap(storedInnerHashAsString);
+
+                if(cellValue.equals(date)){
+
+                    String workHours=storedInnerHash.get("workingHours");    
+                    long totalSeconds=Long.parseLong(workHours);
+
+                    row.getCell(2).setCellValue(storedInnerHash.get("checkout_time"));
+                    row.getCell(3).setCellValue(storedInnerHash.get("checkin_status"));
+                    row.getCell(4).setCellValue(totalSeconds / 3600 + " Hours " + (totalSeconds % 3600) / 60 + " Minutes " + totalSeconds % 60+" Seconds"); 
+                    flag=true;
+                }
+                if(cellValue.equals("Day")||(!(cellValue.equals(date))&&flag)){
+
+                        String workHours=storedInnerHash.get("workingHours");
+                        
+                        long totalSeconds=Long.parseLong(workHours);
+
+                        row = sheet.createRow(lastRowNum+1);
+                        row.createCell(0).setCellValue(date);
+                        row.createCell(1).setCellValue(storedInnerHash.get("checkin_time"));
+                        row.createCell(2).setCellValue(storedInnerHash.get("checkout_time"));
+                        row.createCell(3).setCellValue(storedInnerHash.get("checkin_status"));
+                        row.createCell(4).setCellValue(totalSeconds / 3600 + " Hours " + (totalSeconds % 3600) / 60 + " Minutes " + totalSeconds % 60+" Seconds"); 
+                }
+
+            }
+
+            workbook.write(fileOut);
+        }
+
+        }catch(Exception e){
+            e.printStackTrace();
+        }
+    }
+
      private static String convertMapToString(Map<String, String> map) {
         StringBuilder stringBuilder = new StringBuilder();
         for (Map.Entry<String, String> entry : map.entrySet()) {
@@ -75,59 +193,14 @@ public class CheckInOut {
     }
 
 
-public static boolean doesSheetExist(Workbook workbook, String sheetName) {
+    public static boolean doesSheetExist(Workbook workbook, String sheetName) {
         
         return workbook.getSheet(sheetName) != null;
     }
-    protected void employeeCheckInOut(String employeeId, Jedis jedis){
-
-        String workbookPath = "EmployeeCheckInOut.xls";
-
-        File file = new File(workbookPath);
-        Workbook workbook=null;
-        boolean sheetExists=false;
-        Sheet sheet=null;
-
-            if (file.exists()) {
-                 String sheetName= "Employee_" + employeeId;
-      
-                try (FileInputStream fileInputStream = new FileInputStream(workbookPath)) {
-                workbook= new HSSFWorkbook(fileInputStream);
-                  sheetExists = doesSheetExist(workbook, sheetName);
-
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            } 
-            else {
-                workbook = new HSSFWorkbook();
-                try (FileOutputStream fileOut = new FileOutputStream(file)) {
-                    workbook.write(fileOut);
-                }
-                catch(Exception e){
-                    e.printStackTrace();
-                }
-            }
-
-       try (FileOutputStream fileOut = new FileOutputStream("EmployeeCheckInOut.xls")) {
-
-            if (!sheetExists) {
-
-                sheet = workbook.createSheet("Employee_" + employeeId);
-                Row row = sheet.createRow(0);
-                row.createCell(0).setCellValue("Day");
-                row.createCell(1).setCellValue("checkin_time");
-                row.createCell(2).setCellValue("checkout_time");
-                row.createCell(3).setCellValue("checkin_status");
-                row.createCell(4).setCellValue("workingHours");
-
-            } 
-            else{
-                sheet = workbook.getSheet("Employee_" + employeeId);
-            }
+    protected static void employeeCheckInOut(String employeeId, Jedis jedis){
 
             if(jedis.hget(getCurrentDate(),employeeId)==null){
-                    int lastRowNum = sheet.getLastRowNum();
+
                     Map<String, String> innerHash = new HashMap<>();
                     innerHash.put("checkin_time",getCurrentTime());
                     innerHash.put("checkout_time",getCurrentTime());
@@ -136,13 +209,6 @@ public static boolean doesSheetExist(Workbook workbook, String sheetName) {
 
                     String innerHashAsString = convertMapToString(innerHash);
                     jedis.hset(getCurrentDate(),employeeId,innerHashAsString);
-
-                        Row row = sheet.createRow(lastRowNum+1);
-                        row.createCell(0).setCellValue(getCurrentDate());
-                        row.createCell(1).setCellValue(getCurrentTime());
-                        row.createCell(2).setCellValue(getCurrentTime());
-                        row.createCell(3).setCellValue("checked_in");
-                        row.createCell(4).setCellValue("0 seconds");
 
                     System.out.println("successfully checked In");
                 }
@@ -158,11 +224,7 @@ public static boolean doesSheetExist(Workbook workbook, String sheetName) {
                         storedInnerHash.put("workingHours",String.valueOf(totalSeconds));
                         String innerHashAsString = convertMapToString(storedInnerHash);
                         jedis.hset(getCurrentDate(),employeeId,innerHashAsString);
-                        int lastRowNum = sheet.getLastRowNum();
-                        Row lastRow = sheet.getRow(lastRowNum);
-                        lastRow.getCell(3).setCellValue("checked_out");
-                        lastRow.getCell(2).setCellValue(getCurrentTime());
-                        lastRow.getCell(4).setCellValue(totalSeconds / 3600 + " Hours " + (totalSeconds % 3600) / 60 + " Minutes " + totalSeconds % 60+" Seconds");
+
                         System.out.println("successfully checked Out");
 
                         System.out.println(totalSeconds / 3600 + " Hours " + (totalSeconds % 3600) / 60 + " Minutes " + totalSeconds % 60+" Seconds");
@@ -173,19 +235,11 @@ public static boolean doesSheetExist(Workbook workbook, String sheetName) {
                         String innerHashAsString = convertMapToString(storedInnerHash);
                         jedis.hset(getCurrentDate(),employeeId,innerHashAsString);
 
-                        int lastRowNum = sheet.getLastRowNum();
-                        Row lastRow = sheet.getRow(lastRowNum);
-                        lastRow.getCell(3).setCellValue("checked_out");
                         System.out.println("successfully checked In");
                     }
                 }
-
-                 workbook.write(fileOut);
-        }catch(Exception e){
-            e.printStackTrace();
-        }
-    } 
-}
+            } 
+    }
 
 class EmployeeThread implements Runnable {
     private String employeeId;
@@ -195,7 +249,7 @@ class EmployeeThread implements Runnable {
     public void run() {
         try(Jedis jedis = new Jedis("localhost", 6379)){
 
-            new CheckInOut().employeeCheckInOut(employeeId,jedis);
+            CheckInOut.employeeCheckInOut(employeeId,jedis);
 
         }catch(Exception e){
             e.printStackTrace();
